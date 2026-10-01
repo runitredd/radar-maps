@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Radar">
+<meta name="theme-color" content="#151b20">
+<title>Radar Maps</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#151b20;
+  --panel:rgba(14,19,23,.88);
+  --edge:rgba(255,255,255,.10);
+  --ink:#eef1f2;
+  --muted:#98a3a9;
+  --wp:#c04de0;
+  --mini:min(72vw,44vh,330px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;background:var(--bg);color:var(--ink);
+  font-family:'Barlow Condensed','Arial Narrow',system-ui,sans-serif;font-size:18px}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer;border:0}
+.hidden{display:none!important}
+
+/* ---- map ---- */
+#map{position:fixed;inset:0}
+body.drive{background:radial-gradient(circle at 30% 85%,#1d252b 0%,#101418 70%)}
+body.drive #map{
+  inset:auto;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  width:var(--mini);height:var(--mini);border-radius:50%;clip-path:circle(50%);
+}
+#ring{display:none;position:fixed;pointer-events:none;border-radius:50%;
+  left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  width:var(--mini);height:var(--mini);
+  box-shadow:inset 0 0 0 3px #0a0d10,inset 0 0 0 5px rgba(255,255,255,.14),inset 0 0 40px rgba(0,0,0,.55)}
+body.drive #ring{display:block}
+.player svg{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+.wp{width:22px;height:22px;border-radius:50%;background:var(--wp);border:3px solid #fff;
+  box-shadow:0 0 0 4px rgba(192,77,224,.35),0 2px 8px rgba(0,0,0,.6)}
+
+/* ---- explore UI ---- */
+#explore-ui,#drive-ui{position:fixed;inset:0;pointer-events:none}
+#explore-ui>*,#drive-ui>*{pointer-events:auto}
+body.drive #explore-ui{display:none}
+body:not(.drive) #drive-ui{display:none}
+
+#search{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:12px;right:12px;display:flex;
+  background:var(--panel);border:1px solid var(--edge);border-radius:10px;overflow:hidden;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#q{flex:1;min-width:0;background:transparent;border:0;padding:12px 14px;font-size:19px;outline:none}
+#q::placeholder{color:var(--muted)}
+#search button{background:transparent;padding:0 16px;font-weight:700;color:var(--wp)}
+#results{position:absolute;top:calc(66px + env(safe-area-inset-top,0px));left:12px;right:12px;max-height:50vh;overflow:auto;
+  background:var(--panel);border:1px solid var(--edge);border-radius:10px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#results button{display:block;width:100%;text-align:left;background:transparent;padding:11px 14px;border-bottom:1px solid var(--edge);line-height:1.2}
+#results button:last-child{border-bottom:0}
+#results small{display:block;color:var(--muted);font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.fabs{position:absolute;right:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:10px;align-items:flex-end}
+body.has-route .fabs{bottom:calc(132px + env(safe-area-inset-bottom,0px))}
+.fab{background:var(--panel);border:1px solid var(--edge);border-radius:10px;min-width:52px;height:52px;padding:0 16px;
+  font-weight:700;font-size:19px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.fab.icon{font-size:24px;padding:0}
+
+#routeCard{position:absolute;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  background:var(--panel);border:1px solid var(--edge);border-left:4px solid var(--wp);border-radius:10px;padding:12px 14px;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#destName{font-weight:700;font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#routeMeta{color:var(--muted);margin-top:2px}
+#routeCard .row{display:flex;gap:10px;margin-top:10px}
+.btn{flex:1;height:46px;border-radius:8px;background:var(--wp);font-weight:700;font-size:20px}
+.btn.ghost{background:rgba(255,255,255,.08)}
+
+/* ---- drive UI ---- */
+#turnCard{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:12px;right:12px;display:flex;align-items:center;gap:14px;
+  background:var(--panel);border:1px solid var(--edge);border-left:4px solid var(--wp);border-radius:10px;padding:12px 14px}
+#turnArrow{font-size:46px;line-height:1;width:48px;text-align:center;font-weight:700}
+#turnDist{font-size:34px;font-weight:700;line-height:1}
+#turnText{font-size:20px;color:var(--ink);opacity:.9;line-height:1.15;margin-top:3px}
+#side{position:absolute;right:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  width:calc(100vw - var(--mini) - 40px);max-width:200px;display:flex;flex-direction:column;align-items:flex-end;gap:12px;text-align:right}
+.stat .big{font-size:52px;font-weight:700;line-height:.9;font-variant-numeric:tabular-nums}
+.stat .mid{font-size:30px;font-weight:700;line-height:1}
+.stat small{display:block;color:var(--muted);font-size:16px}
+.credit{position:absolute;left:14px;bottom:calc(4px + env(safe-area-inset-bottom,0px));font-size:11px;color:var(--muted);opacity:.7;pointer-events:none}
+body.drive .maplibregl-ctrl-attrib{display:none}
+
+/* ---- toast & start ---- */
+#toast{position:fixed;left:50%;top:calc(80px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+  background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:10px 16px;max-width:88vw;text-align:center;
+  opacity:0;transition:opacity .25s;pointer-events:none;z-index:20}
+#toast.show{opacity:1}
+#start{position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;justify-content:flex-end;gap:18px;
+  padding:32px 26px calc(40px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(180deg,rgba(21,27,32,.2) 0%,rgba(21,27,32,.85) 45%,#151b20 75%)}
+#start h1{margin:0;font-size:64px;line-height:.9;font-weight:700;letter-spacing:-.01em}
+#start p{margin:0;color:var(--muted);font-size:19px;max-width:30ch;line-height:1.3}
+#startBtn{height:58px;border-radius:10px;background:var(--wp);font-size:23px;font-weight:700}
+#startNote{font-size:16px!important}
+button:focus-visible,input:focus-visible{outline:2px solid var(--wp);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="ring"></div>
+
+<div id="explore-ui">
+  <form id="search" autocomplete="off">
+    <input id="q" type="search" placeholder="Search a place or address" enterkeyhint="search" aria-label="Search">
+    <button type="submit">Search</button>
+  </form>
+  <div id="results" class="hidden"></div>
+  <div class="fabs">
+    <button id="recenter" class="fab icon hidden" aria-label="Recenter on me">◎</button>
+    <button id="toDrive" class="fab">Drive</button>
+  </div>
+  <div id="routeCard" class="hidden">
+    <div id="destName"></div>
+    <div id="routeMeta">Finding a route…</div>
+    <div class="row">
+      <button id="clearBtn" class="btn ghost">Clear</button>
+      <button id="goBtn" class="btn">Start driving</button>
+    </div>
+  </div>
+</div>
+
+<div id="drive-ui">
+  <div id="turnCard" class="hidden">
+    <div id="turnArrow">↑</div>
+    <div><div id="turnDist"></div><div id="turnText"></div></div>
+  </div>
+  <div id="side">
+    <div id="etaStat" class="stat hidden"><div class="mid" id="etaTime"></div><small id="etaRem"></small></div>
+    <div class="stat"><div class="big" id="speed">0</div><small>mph</small></div>
+    <button id="toExplore" class="fab">Full map</button>
+  </div>
+  <div class="credit">© OpenStreetMap · OpenFreeMap</div>
+</div>
+
+<div id="toast"></div>
+
+<div id="start">
+  <h1>Radar<br>Maps</h1>
+  <p>Allow location and motion access when asked. Motion lets the minimap turn with you.</p>
+  <button id="startBtn">Start</button>
+  <p id="startNote" class="hidden"></p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+// ---------- free services, no keys ----------
+const TILES   = 'https://tiles.openfreemap.org/planet';
+const GLYPHS  = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
+const ROUTER  = 'https://router.project-osrm.org/route/v1/driving/';
+const SEARCH  = 'https://nominatim.openstreetmap.org/search';
+
+// ---------- map look (edit these to restyle) ----------
+const C = {
+  land:'#262e34', park:'#2b3b2f', wood:'#28362c', water:'#34505f', aero:'#2e363c',
+  building:'#30383e', buildingEdge:'#3a4349',
+  service:'#454d52', minor:'#535b60', mid:'#737b80', major:'#949b9f', motorway:'#b0b6b9',
+  rail:'#434b50', label:'#d9dee0', halo:'#151a1e', place:'#c3c9cc',
+  route:'#c04de0', routeEdge:'#2a0f33'
+};
+const width = base => ['interpolate',['exponential',1.5],['zoom'],10,base*.5,14,base*1.6,18,base*7];
+const notTunnel = ['!=',['coalesce',['get','brunnel'],''],'tunnel'];
+const road = (id, classes, color, base, minzoom) => ({
+  id, type:'line', source:'omt', 'source-layer':'transportation', minzoom,
+  filter:['all',['in',['get','class'],['literal',classes]],notTunnel],
+  layout:{'line-cap':'round','line-join':'round'},
+  paint:{'line-color':color,'line-width':width(base)}
+});
+const nameExpr = ['coalesce',['get','name:en'],['get','name']];
+
+const style = {
+  version:8, glyphs:GLYPHS,
+  sources:{ omt:{type:'vector', url:TILES} },
+  layers:[
+    {id:'bg',type:'background',paint:{'background-color':C.land}},
+    {id:'landcover',type:'fill',source:'omt','source-layer':'landcover',
+      filter:['in',['get','class'],['literal',['wood','grass','farmland']]],paint:{'fill-color':C.wood,'fill-opacity':.7}},
+    {id:'park',type:'fill',source:'omt','source-layer':'park',paint:{'fill-color':C.park}},
+    {id:'aeroway',type:'fill',source:'omt','source-layer':'aeroway',paint:{'fill-color':C.aero}},
+    {id:'water',type:'fill',source:'omt','source-layer':'water',paint:{'fill-color':C.water}},
+    {id:'waterway',type:'line',source:'omt','source-layer':'waterway',
+      paint:{'line-color':C.water,'line-width':['interpolate',['linear'],['zoom'],10,.5,16,3]}},
+    {id:'building',type:'fill',source:'omt','source-layer':'building',minzoom:14,
+      paint:{'fill-color':C.building,'fill-outline-color':C.buildingEdge}},
+    {id:'tunnel',type:'line',source:'omt','source-layer':'transportation',minzoom:11,
+      filter:['all',['==',['get','brunnel'],'tunnel'],['in',['get','class'],['literal',['motorway','trunk','primary']]]],
+      paint:{'line-color':C.mid,'line-opacity':.35,'line-width':width(1.4),'line-dasharray':[2,1.5]}},
+    {id:'rail',type:'line',source:'omt','source-layer':'transportation',minzoom:12,
+      filter:['==',['get','class'],'rail'],paint:{'line-color':C.rail,'line-width':1.2,'line-dasharray':[3,3]}},
+    road('road-service',['service','track'],C.service,.7,14),
+    road('road-minor',['minor'],C.minor,1,12),
+    road('road-mid',['secondary','tertiary'],C.mid,1.3,10),
+    road('road-major',['primary','trunk'],C.major,1.6,8),
+    road('road-motorway',['motorway'],C.motorway,2,6),
+    {id:'road-label',type:'symbol',source:'omt','source-layer':'transportation_name',minzoom:14,
+      filter:['in',['get','class'],['literal',['motorway','trunk','primary','secondary','tertiary','minor']]],
+      layout:{'symbol-placement':'line','text-field':nameExpr,'text-font':['Noto Sans Regular'],'text-size':11},
+      paint:{'text-color':C.label,'text-halo-color':C.halo,'text-halo-width':1.4}},
+    {id:'place-label',type:'symbol',source:'omt','source-layer':'place',
+      filter:['in',['get','class'],['literal',['city','town','suburb','neighbourhood','village']]],
+      layout:{'text-field':['upcase',nameExpr],'text-font':['Noto Sans Bold'],
+        'text-size':['match',['get','class'],'city',15,'town',13,11],'text-letter-spacing':.1},
+      paint:{'text-color':C.place,'text-halo-color':C.halo,'text-halo-width':1.6,'text-opacity':.85}}
+  ]
+};
+const LABEL_LAYERS = ['road-label','place-label'];
+
+// ---------- state ----------
+const S = {
+  pos:null, compass:null, gpsHeading:null, speed:0, zoom:16.5,
+  mode:'explore', follow:true, posDirty:false,
+  dest:null, destName:'', route:null, routing:false, lastRouteAt:0, offCount:0, fitted:false
+};
+const $ = id => document.getElementById(id);
+
+// ---------- map ----------
+const map = new maplibregl.Map({
+  container:'map', style, center:[-74.006,40.7128], zoom:12,
+  attributionControl:false, pitchWithRotate:false, dragRotate:false
+});
+map.touchZoomRotate.disableRotation();
+map.addControl(new maplibregl.AttributionControl({compact:true}),'bottom-left');
+
+const playerEl = document.createElement('div');
+playerEl.className = 'player';
+playerEl.innerHTML = '<svg viewBox="0 0 40 40" width="34" height="34"><path d="M20 4 L33 34 L20 27 L7 34 Z" fill="#fff" stroke="#0b0e10" stroke-width="2.5" stroke-linejoin="round"/></svg>';
+const player = new maplibregl.Marker({element:playerEl, rotationAlignment:'map', pitchAlignment:'map'});
+let playerAdded = false;
+
+const wpEl = document.createElement('div'); wpEl.className = 'wp';
+const wpMarker = new maplibregl.Marker({element:wpEl});
+
+map.on('load', () => {
+  map.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'route-edge',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},
+    paint:{'line-color':C.routeEdge,'line-width':['interpolate',['linear'],['zoom'],10,6,18,16]}},'road-label');
+  map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},
+    paint:{'line-color':C.route,'line-width':['interpolate',['linear'],['zoom'],10,3.5,18,10]}},'road-label');
+});
+
+map.on('dragstart', () => { if (S.mode==='explore') { S.follow=false; $('recenter').classList.remove('hidden'); } });
+map.on('click', e => {
+  if (S.mode!=='explore') return;
+  $('results').classList.add('hidden');
+  setDestination([e.lngLat.lng, e.lngLat.lat], 'Dropped waypoint');
+});
+
+// ---------- helpers ----------
+const rad = d => d*Math.PI/180;
+function hav(a,b){
+  const R=6371000, dLat=rad(b[1]-a[1]), dLon=rad(b[0]-a[0]);
+  const h=Math.sin(dLat/2)**2+Math.cos(rad(a[1]))*Math.cos(rad(b[1]))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function smoothAngle(prev,next,k){
+  if (prev==null) return next;
+  const diff=((next-prev+540)%360)-180;
+  return (prev+diff*k+360)%360;
+}
+function fmtDist(m){
+  const mi=m/1609.34;
+  if (mi<0.1) return Math.max(50,Math.round(m*3.28084/50)*50)+' ft';
+  return (mi<10?mi.toFixed(1):Math.round(mi))+' mi';
+}
+function fmtDur(s){
+  const m=Math.round(s/60);
+  return m<60 ? m+' min' : Math.floor(m/60)+' h '+(m%60)+' min';
+}
+let toastT;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+function heading(){
+  if (S.speed>4 && S.gpsHeading!=null) return S.gpsHeading;   // moving: trust GPS
+  return S.compass ?? S.gpsHeading ?? 0;
+}
+
+// project a point onto the route line
+function locateOnRoute(p){
+  const c=S.route.coords, kx=111320*Math.cos(rad(p[1])), ky=110540;
+  let best={d:Infinity,idx:0,t:0};
+  for (let i=0;i<c.length-1;i++){
+    const ax=(c[i][0]-p[0])*kx, ay=(c[i][1]-p[1])*ky;
+    const dx=(c[i+1][0]-c[i][0])*kx, dy=(c[i+1][1]-c[i][1])*ky;
+    const L=dx*dx+dy*dy;
+    let t=L ? -(ax*dx+ay*dy)/L : 0; t=Math.max(0,Math.min(1,t));
+    const d=Math.hypot(ax+t*dx, ay+t*dy);
+    if (d<best.d) best={d,idx:i,t};
+  }
+  return best;
+}
+
+// ---------- turn instructions ----------
+const ARROWS = {'left':'←','slight left':'↖','sharp left':'↙','right':'→','slight right':'↗','sharp right':'↘','straight':'↑','uturn':'↶'};
+function instruction(step){
+  const m=step.maneuver, name=step.name||step.ref||'', onto=name?' onto '+name:'', mod=m.modifier||'';
+  switch(m.type){
+    case 'depart': return 'Head out'+(name?' on '+name:'');
+    case 'arrive': return 'Arrive at your waypoint';
+    case 'turn': case 'end of road':
+      if (mod==='uturn') return 'Make a U-turn';
+      if (mod==='straight') return 'Continue straight'+onto;
+      return 'Turn '+mod+onto;
+    case 'continue': case 'new name': return 'Continue'+onto;
+    case 'merge': return 'Merge'+onto;
+    case 'on ramp': return 'Take the ramp'+onto;
+    case 'off ramp': return 'Take the exit'+onto;
+    case 'fork': return 'Keep '+(mod.replace('slight ',''))+onto;
+    case 'roundabout': case 'rotary': case 'roundabout turn':
+      return 'At the roundabout, take exit '+(m.exit||1)+onto;
+    default: return mod ? 'Go '+mod+onto : 'Continue'+onto;
+  }
+}
+
+// ---------- routing ----------
+function setDestination(lngLat,name){
+  S.dest=lngLat; S.destName=name; S.route=null; S.fitted=false;
+  wpMarker.setLngLat(lngLat).addTo(map);
+  $('destName').textContent=name;
+  $('routeMeta').textContent = S.pos ? 'Finding a route…' : 'Waiting for your location…';
+  $('routeCard').classList.remove('hidden');
+  document.body.classList.add('has-route');
+  if (S.pos) fetchRoute();
+}
+
+async function fetchRoute(){
+  if (!S.pos || !S.dest || S.routing) return;
+  S.routing=true; S.lastRouteAt=Date.now();
+  const url=`${ROUTER}${S.pos[0]},${S.pos[1]};${S.dest[0]},${S.dest[1]}?overview=full&geometries=geojson&steps=true`;
+  try{
+    const r=await fetch(url); const j=await r.json();
+    if (j.code!=='Ok' || !j.routes || !j.routes.length) throw new Error(j.message||'no road path found');
+    const rt=j.routes[0], coords=rt.geometry.coordinates;
+    const cum=[0];
+    for (let i=1;i<coords.length;i++) cum[i]=cum[i-1]+hav(coords[i-1],coords[i]);
+    // where each maneuver sits along the line
+    const steps=rt.legs[0].steps; let from=0;
+    steps.forEach(s=>{
+      let bi=from, bd=Infinity;
+      for (let i=from;i<coords.length;i++){ const d=hav(coords[i],s.maneuver.location); if(d<bd){bd=d;bi=i;} if(bd<1)break; }
+      s._idx=bi; from=bi;
+    });
+    S.route={coords,cum,total:cum[cum.length-1],duration:rt.duration,steps};
+    S.offCount=0;
+    map.getSource('route')?.setData({type:'Feature',geometry:rt.geometry,properties:{}});
+    if (S.mode==='explore' && !S.fitted){
+      const b=coords.reduce((bb,c)=>bb.extend(c), new maplibregl.LngLatBounds(coords[0],coords[0]));
+      map.fitBounds(b,{padding:{top:110,bottom:200,left:50,right:50},duration:600});
+      S.follow=false; S.fitted=true; $('recenter').classList.remove('hidden');
+    }
+    navUpdate();
+  }catch(e){
+    $('routeMeta').textContent='No route: '+e.message;
+    toast('Couldn’t get a route. Try a spot on a road.');
+  }finally{ S.routing=false; }
+}
+
+function clearRoute(){
+  S.dest=null; S.route=null;
+  wpMarker.remove();
+  map.getSource('route')?.setData({type:'FeatureCollection',features:[]});
+  $('routeCard').classList.add('hidden'); $('turnCard').classList.add('hidden'); $('etaStat').classList.add('hidden');
+  document.body.classList.remove('has-route');
+}
+
+function navUpdate(){
+  const R=S.route; if (!R || !S.pos) return;
+  if (hav(S.pos,S.dest)<30){ toast('You’ve arrived'); clearRoute(); return; }
+  const loc=locateOnRoute(S.pos);
+  // off route → reroute
+  if (loc.d>50){
+    S.offCount++;
+    if (S.offCount>=3 && Date.now()-S.lastRouteAt>12000){ toast('Rerouting'); fetchRoute(); }
+  } else S.offCount=0;
+  const along=R.cum[loc.idx]+loc.t*(R.cum[loc.idx+1]-R.cum[loc.idx]);
+  const remaining=Math.max(0,R.total-along);
+  const secs=R.duration*(remaining/R.total);
+  // next maneuver ahead of us
+  let step=R.steps[R.steps.length-1];
+  for (let i=1;i<R.steps.length;i++){ if (R.steps[i]._idx>loc.idx){ step=R.steps[i]; break; } }
+  const toStep=Math.max(0,R.cum[step._idx]-along);
+
+  $('routeMeta').textContent=fmtDist(remaining)+', '+fmtDur(secs);
+  $('turnArrow').textContent = step.maneuver.type==='arrive' ? '◆' : (ARROWS[step.maneuver.modifier]||'↑');
+  $('turnDist').textContent=fmtDist(toStep);
+  $('turnText').textContent=instruction(step);
+  $('turnCard').classList.remove('hidden');
+  const eta=new Date(Date.now()+secs*1000);
+  $('etaTime').textContent=eta.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+  $('etaRem').textContent='arrive · '+fmtDist(remaining);
+  $('etaStat').classList.remove('hidden');
+}
+
+// ---------- rendering loop ----------
+let raf=null;
+const schedule=()=>{ if(!raf) raf=requestAnimationFrame(render); };
+function render(){
+  raf=null;
+  if (!S.pos) return;
+  const h=heading();
+  if (!playerAdded){ player.setLngLat(S.pos).addTo(map); playerAdded=true; }
+  player.setLngLat(S.pos).setRotation(h);
+  if (S.mode==='drive'){
+    const target = S.speed>22 ? 14.8 : S.speed>12 ? 15.6 : 16.5;
+    S.zoom += (target-S.zoom)*0.08;
+    map.jumpTo({center:S.pos, bearing:h, zoom:S.zoom});
+    if (Math.abs(target-S.zoom)>0.01) schedule();
+  } else if (S.follow && S.posDirty){
+    map.jumpTo({center:S.pos});
+  }
+  S.posDirty=false;
+}
+
+// ---------- sensors ----------
+function listenCompass(){
+  window.addEventListener('deviceorientation', e=>{
+    let h=null;
+    if (typeof e.webkitCompassHeading==='number') h=e.webkitCompassHeading;   // iPhone
+    else if (e.absolute && e.alpha!=null) h=360-e.alpha;
+    if (h==null) return;
+    const screenAngle=(screen.orientation&&screen.orientation.angle)||window.orientation||0;
+    S.compass=smoothAngle(S.compass,(h+screenAngle+360)%360,0.2);
+    schedule();
+  });
+}
+
+let firstFix=true;
+function startGPS(){
+  if (!('geolocation' in navigator)){ toast('This browser has no location access.'); return; }
+  navigator.geolocation.watchPosition(p=>{
+    const c=p.coords;
+    S.pos=[c.longitude,c.latitude]; S.posDirty=true;
+    S.speed = (c.speed!=null && c.speed>=0) ? c.speed : 0;
+    if (c.heading!=null && !isNaN(c.heading) && S.speed>2.5) S.gpsHeading=c.heading;
+    $('speed').textContent=Math.round(S.speed*2.23694);
+    if (firstFix){ firstFix=false; map.jumpTo({center:S.pos,zoom:15}); }
+    if (S.dest && !S.route) fetchRoute(); else navUpdate();
+    schedule();
+  }, err=>{
+    toast(err.code===1 ? 'Location is blocked. Turn on Location for Safari in iPhone Settings.' : 'Can’t find your location yet.');
+  }, {enableHighAccuracy:true, maximumAge:1000, timeout:20000});
+}
+
+let wakeLock=null;
+async function keepAwake(){
+  try{ if ('wakeLock' in navigator) wakeLock=await navigator.wakeLock.request('screen'); }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{ if (document.visibilityState==='visible') keepAwake(); });
+
+// ---------- modes ----------
+function setMode(m){
+  S.mode=m;
+  document.body.classList.toggle('drive', m==='drive');
+  const drive = m==='drive';
+  ['dragPan','scrollZoom','doubleClickZoom','touchZoomRotate','keyboard','boxZoom'].forEach(k=> drive ? map[k].disable() : map[k].enable());
+  if (!drive) map.touchZoomRotate.disableRotation();
+  LABEL_LAYERS.forEach(id=>{ if (map.getLayer(id)) map.setLayoutProperty(id,'visibility', drive?'none':'visible'); });
+  requestAnimationFrame(()=>{
+    map.resize();
+    if (drive){
+      const s=$('map').clientHeight;
+      map.setPadding({top:s*0.3,bottom:0,left:0,right:0});   // puts you a bit below center, like a game radar
+      S.zoom=map.getZoom(); S.follow=true;
+      if (!S.pos) toast('Waiting for your location…');
+    } else {
+      map.setPadding({top:0,bottom:0,left:0,right:0});
+      map.jumpTo({bearing:0});
+      if (S.pos) map.easeTo({center:S.pos,zoom:15,duration:400});
+      S.follow=true; $('recenter').classList.add('hidden');
+    }
+    schedule();
+  });
+}
+
+// ---------- search ----------
+$('search').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const q=$('q').value.trim(); if (!q) return;
+  $('q').blur();
+  let url=`${SEARCH}?format=jsonv2&limit=6&q=${encodeURIComponent(q)}`;
+  if (S.pos){ const [x,y]=S.pos; url+=`&viewbox=${x-.6},${y+.6},${x+.6},${y-.6}`; }
+  const box=$('results');
+  box.innerHTML='<button disabled>Searching…</button>'; box.classList.remove('hidden');
+  try{
+    const res=await (await fetch(url)).json();
+    if (!res.length){ box.innerHTML='<button disabled>No matches. Try adding a town or ZIP code.</button>'; return; }
+    box.innerHTML='';
+    res.forEach(r=>{
+      const b=document.createElement('button');
+      const title=r.name || r.display_name.split(',')[0];
+      b.innerHTML=`${title}<small></small>`;
+      b.querySelector('small').textContent=r.display_name;
+      b.onclick=()=>{ box.classList.add('hidden'); setDestination([+r.lon,+r.lat], title); };
+      box.appendChild(b);
+    });
+  }catch(err){ box.innerHTML='<button disabled>Search is unavailable. Check your connection.</button>'; }
+});
+$('q').addEventListener('focus',()=>{ if ($('results').children.length) $('results').classList.remove('hidden'); });
+
+// ---------- buttons ----------
+$('recenter').onclick=()=>{ S.follow=true; $('recenter').classList.add('hidden'); if (S.pos) map.easeTo({center:S.pos,duration:400}); };
+$('toDrive').onclick=()=>setMode('drive');
+$('goBtn').onclick=()=>setMode('drive');
+$('toExplore').onclick=()=>setMode('explore');
+$('clearBtn').onclick=clearRoute;
+
+$('startBtn').onclick=async ()=>{
+  if (typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{ if (await DeviceOrientationEvent.requestPermission()==='granted') listenCompass(); else toast('Motion is off, so the map will turn using GPS while you drive.'); }
+    catch(e){ toast('Motion access failed. The map will turn using GPS.'); }
+  } else listenCompass();
+  startGPS(); keepAwake();
+  $('start').classList.add('hidden');
+};
+if (!window.isSecureContext){
+  $('startNote').textContent='Location only works from an https:// address. Open this from your GitHub Pages link.';
+  $('startNote').classList.remove('hidden');
+}
+</script>
+</body>
+</html>
